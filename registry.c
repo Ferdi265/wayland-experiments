@@ -84,7 +84,6 @@ int main(void) {
     ctx->registry = wl_display_get_registry(ctx->display);
     wl_registry_add_listener(ctx->registry, &registry_listener, (void *)ctx);
 
-    wl_display_dispatch(ctx->display);
     wl_display_roundtrip(ctx->display);
 
     if (ctx->compositor == NULL) {

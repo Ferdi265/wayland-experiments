@@ -350,7 +350,6 @@ int main(void) {
     wl_registry_add_listener(ctx->registry, &registry_listener, (void *)ctx);
 
     printf("[info] waiting for events\n");
-    //wl_display_dispatch(ctx->display);
     wl_display_roundtrip(ctx->display);
 
     printf("[info] checking if protocols found\n");
