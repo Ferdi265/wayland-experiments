@@ -239,9 +239,38 @@ static void xdg_toplevel_event_configure(
     printf("[xdg_toplevel] configure width=%d, height=%d\n", width, height);
 
     printf("[xdg_toplevel] states = {");
-    uint32_t * state;
+    enum xdg_toplevel_state * state;
     wl_array_for_each(state, states) {
-        printf("%d, ", *state);
+        switch (*state) {
+            case XDG_TOPLEVEL_STATE_MAXIMIZED:
+                printf("maximized");
+                break;
+            case XDG_TOPLEVEL_STATE_FULLSCREEN:
+                printf("fullscreen");
+                break;
+            case XDG_TOPLEVEL_STATE_RESIZING:
+                printf("resizing");
+                break;
+            case XDG_TOPLEVEL_STATE_ACTIVATED:
+                printf("activated");
+                break;
+            case XDG_TOPLEVEL_STATE_TILED_LEFT:
+                printf("tiled-left");
+                break;
+            case XDG_TOPLEVEL_STATE_TILED_RIGHT:
+                printf("tiled-right");
+                break;
+            case XDG_TOPLEVEL_STATE_TILED_TOP:
+                printf("tiled-top");
+                break;
+            case XDG_TOPLEVEL_STATE_TILED_BOTTOM:
+                printf("tiled-bottom");
+                break;
+            default:
+                printf("%d", *state);
+                break;
+        }
+        printf(", ");
     }
     printf("}\n");
 
