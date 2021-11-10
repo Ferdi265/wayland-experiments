@@ -1,10 +1,10 @@
-# Wayland Examples
+# Wayland Experiments
 
 This repo contains the results of my personal experiments with writing a first
 Wayland client.
 
-The examples are roughly based on an [old Wayland Client Programming Tutorial][1],
-but updated to use `xdg-shell` instead.
+The experiments are roughly based on an [old Wayland Client Programming Tutorial][1],
+but updated to use `xdg_shell` instead of `wl_shell`.
 
 The main purpose of these experiments was to get a basic barebones client
 running that can at least create "a window".

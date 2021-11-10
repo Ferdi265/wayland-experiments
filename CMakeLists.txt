@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-project(wayland-examples C)
+project(wayland-experiments C)
 
-# wayland protocols needed by the examples
+# wayland protocols needed by the experiments
 set(PROTOCOLDIR "/usr/share/wayland-protocols/" CACHE STRING "wayland-protocols directory")
 set(PROTOCOLS
     "stable/xdg-shell/xdg-shell.xml"
@@ -40,9 +40,9 @@ foreach(proto ${PROTOCOLS})
 endforeach()
 
 # eample targets
-file(GLOB examples *.c)
-foreach(example ${examples})
-    cmake_path(GET example STEM name)
-    add_executable(${name} ${example})
+file(GLOB experiments *.c)
+foreach(experiment ${experiments})
+    cmake_path(GET experiment STEM name)
+    add_executable(${name} ${experiment})
     target_link_libraries(${name} PRIVATE wayland-client protocols)
 endforeach()
