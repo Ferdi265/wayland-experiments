@@ -9,7 +9,9 @@ set(WLRPROTOCOLDIR "${CMAKE_SOURCE_DIR}/wlr-protocols/" CACHE STRING "wlr-protoc
 set(PROTOCOLS
     "stable/xdg-shell/xdg-shell.xml"
     "stable/viewporter/viewporter.xml"
+    "unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml"
     "unstable/wlr-screencopy-unstable-v1.xml"
+    "unstable/wlr-export-dmabuf-unstable-v1.xml"
 )
 
 # wayland protocol wrapper generation with wayland-scanner

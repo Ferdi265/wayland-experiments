@@ -11,7 +11,8 @@
 #include <wayland-client.h>
 #include <viewporter.h>
 #include <xdg-shell.h>
-#include <wlr-screencopy-unstable-v1.h>
+#include <linux-dmabuf-unstable-v1.h>
+#include <wlr-export-dmabuf-unstable-v1.h>
 
 typedef struct {
     struct wl_output * proxy;
@@ -27,12 +28,14 @@ typedef struct {
     struct wl_shm * shm;
     struct wp_viewporter * viewporter;
     struct xdg_wm_base * xdg_wm_base;
-    struct zwlr_screencopy_manager_v1 * screencopy;
+    struct zwp_linux_dmabuf_v1 * linux_dmabuf;
+    struct zwlr_export_dmabuf_manager_v1 * export_dmabuf;
     uint32_t compositor_id;
     uint32_t shm_id;
     uint32_t viewporter_id;
     uint32_t xdg_wm_base_id;
-    uint32_t screencopy_id;
+    uint32_t linux_dmabuf_id;
+    uint32_t export_dmabuf_id;
     struct wl_list /*output_t*/ outputs;
 
     struct wl_shm_pool * shm_pool;
@@ -43,11 +46,20 @@ typedef struct {
     uint32_t shm_height;
     int shm_fd;
 
+    struct zwp_linux_buffer_params_v1 * dmabuf_params;
+    struct wl_buffer * dmabuf_buffer;
+    uint32_t dmabuf_width;
+    uint32_t dmabuf_height;
+    uint32_t dmabuf_format;
+    uint32_t dmabuf_modifier_lo;
+    uint32_t dmabuf_modifier_hi;
+    uint32_t dmabuf_flags;
+
     struct wl_surface * surface;
     struct wp_viewport * viewport;
     struct xdg_surface * xdg_surface;
     struct xdg_toplevel * xdg_toplevel;
-    struct zwlr_screencopy_frame_v1 * screencopy_frame;
+    struct zwlr_export_dmabuf_frame_v1 * dmabuf_frame;
 
     uint32_t last_surface_serial;
     uint32_t win_width;
@@ -61,7 +73,7 @@ typedef struct {
 static void cleanup(ctx_t * ctx) {
     printf("[info] cleaning up\n");
 
-    if (ctx->screencopy_frame != NULL) zwlr_screencopy_frame_v1_destroy(ctx->screencopy_frame);
+    if (ctx->dmabuf_frame != NULL) zwlr_export_dmabuf_frame_v1_destroy(ctx->dmabuf_frame);
     if (ctx->xdg_toplevel != NULL) xdg_toplevel_destroy(ctx->xdg_toplevel);
     if (ctx->xdg_surface != NULL) xdg_surface_destroy(ctx->xdg_surface);
     if (ctx->viewport != NULL) wp_viewport_destroy(ctx->viewport);
@@ -79,7 +91,8 @@ static void cleanup(ctx_t * ctx) {
         free(output);
     }
 
-    if (ctx->screencopy != NULL) zwlr_screencopy_manager_v1_destroy(ctx->screencopy);
+    if (ctx->export_dmabuf != NULL) zwlr_export_dmabuf_manager_v1_destroy(ctx->export_dmabuf);
+    if (ctx->linux_dmabuf != NULL) zwp_linux_dmabuf_v1_destroy(ctx->linux_dmabuf);
     if (ctx->xdg_wm_base != NULL) xdg_wm_base_destroy(ctx->xdg_wm_base);
     if (ctx->viewporter != NULL) wp_viewporter_destroy(ctx->viewporter);
     if (ctx->shm != NULL) wl_shm_destroy(ctx->shm);
@@ -136,14 +149,22 @@ static void registry_event_add(
 
         ctx->xdg_wm_base = (struct xdg_wm_base *)wl_registry_bind(registry, id, &xdg_wm_base_interface, 2);
         ctx->xdg_wm_base_id = id;
-    } else if (strcmp(interface, "zwlr_screencopy_manager_v1") == 0) {
-        if (ctx->screencopy != NULL) {
-            printf("[!] wl_registry: duplicate screencopy\n");
+    } else if (strcmp(interface, "zwp_linux_dmabuf_v1") == 0) {
+        if (ctx->linux_dmabuf != NULL) {
+            printf("[!] wl_registry: duplicate linux_dmabuf\n");
             exit_fail(ctx);
         }
 
-        ctx->screencopy = (struct zwlr_screencopy_manager_v1 *)wl_registry_bind(registry, id, &zwlr_screencopy_manager_v1_interface, 3);
-        ctx->screencopy_id = id;
+        ctx->linux_dmabuf = (struct zwp_linux_dmabuf_v1 *)wl_registry_bind(registry, id, &zwp_linux_dmabuf_v1_interface, 4);
+        ctx->linux_dmabuf_id = id;
+    } else if (strcmp(interface, "zwlr_export_dmabuf_manager_v1") == 0) {
+        if (ctx->export_dmabuf != NULL) {
+            printf("[!] wl_registry: duplicate export_dmabuf\n");
+            exit_fail(ctx);
+        }
+
+        ctx->export_dmabuf = (struct zwlr_export_dmabuf_manager_v1 *)wl_registry_bind(registry, id, &zwlr_export_dmabuf_manager_v1_interface, 1);
+        ctx->export_dmabuf_id = id;
     } else if (strcmp(interface, "wl_output") == 0) {
         output_t * output = malloc(sizeof (output_t));
         if (output == NULL) {
@@ -177,8 +198,11 @@ static void registry_event_remove(
     } else if (id == ctx->xdg_wm_base_id) {
         printf("[!] wl_registry: xdg_wm_base disapperared\n");
         exit_fail(ctx);
-    } else if (id == ctx->screencopy_id) {
-        printf("[!] wl_registry: screencopy disapperared\n");
+    } else if (id == ctx->linux_dmabuf_id) {
+        printf("[!] wl_registry: linux_dmabuf disapperared\n");
+        exit_fail(ctx);
+    } else if (id == ctx->export_dmabuf_id) {
+        printf("[!] wl_registry: export_dmabuf disapperared\n");
         exit_fail(ctx);
     } else {
         output_t *output, *output_next;
@@ -199,7 +223,108 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = registry_event_remove
 };
 
-// --- zwlr_screencopy_frame_v1 event handlers ---
+// --- zwlr_export_dmabuf_frame_v1 event handlers ---
+
+static void zwlr_export_dmabuf_frame_frame(void * data, struct zwlr_export_dmabuf_frame_v1 * frame,
+    uint32_t width, uint32_t height, uint32_t offset_x, uint32_t offset_y, uint32_t buffer_flags, uint32_t flags, uint32_t format, uint32_t modifier_hi, uint32_t modifier_lo, uint32_t num_objects
+) {
+    ctx_t * ctx = (ctx_t *)data;
+    printf("[dmabuf_frame] frame %dx%d+%d+%d@(%d,%d,%d,%d,%d)*%d\n", width, height, offset_x, offset_y, format, modifier_hi, modifier_lo, buffer_flags, flags, num_objects);
+
+    if (ctx->dmabuf_params != NULL) {
+        zwp_linux_buffer_params_v1_destroy(ctx->dmabuf_params);
+    }
+
+    printf("[info] creating dmabuf buffer params\n");
+    ctx->dmabuf_params = zwp_linux_dmabuf_v1_create_params(ctx->linux_dmabuf);
+    ctx->dmabuf_width = width;
+    ctx->dmabuf_height = height;
+    ctx->dmabuf_format = format;
+    ctx->dmabuf_flags = buffer_flags;
+    ctx->dmabuf_modifier_hi = modifier_hi;
+    ctx->dmabuf_modifier_lo = modifier_lo;
+}
+
+static void zwlr_export_dmabuf_frame_object(void * data, struct zwlr_export_dmabuf_frame_v1 * frame,
+    uint32_t index, int fd, uint32_t size, uint32_t offset, uint32_t stride, uint32_t plane_index
+) {
+    ctx_t * ctx = (ctx_t *)data;
+    printf("[dmabuf_frame] object %d@%d -> %d,%d\n", plane_index, fd, offset, stride);
+
+    printf("[info] adding dmabuf plane object\n");
+    zwp_linux_buffer_params_v1_add(ctx->dmabuf_params, fd, plane_index, offset, stride, ctx->dmabuf_modifier_hi, ctx->dmabuf_modifier_lo);
+}
+
+static void zwlr_export_dmabuf_frame_ready(void * data, struct zwlr_export_dmabuf_frame_v1 * frame,
+    uint32_t sec_hi, uint32_t sec_lo, uint32_t nsec
+) {
+    ctx_t * ctx = (ctx_t *)data;
+    printf("[dmabuf_frame] ready\n");
+
+    if (ctx->dmabuf_buffer != NULL) {
+        wl_buffer_destroy(ctx->dmabuf_buffer);
+    }
+
+    printf("[info] creating dmabuf buffer\n");
+    ctx->dmabuf_buffer = zwp_linux_buffer_params_v1_create_immed(ctx->dmabuf_params, ctx->dmabuf_width, ctx->dmabuf_height, ctx->dmabuf_format, ctx->dmabuf_flags);
+
+    printf("[info] attaching buffer to surface\n");
+    wl_surface_attach(ctx->surface, ctx->dmabuf_buffer, 0, 0);
+
+    printf("[info] setting source viewport\n");
+    wp_viewport_set_source(ctx->viewport, 0, 0, wl_fixed_from_int(ctx->dmabuf_width), wl_fixed_from_int(ctx->dmabuf_height));
+
+    printf("[info] committing surface\n");
+    wl_surface_commit(ctx->surface);
+}
+
+static void zwlr_export_dmabuf_frame_cancel(void * data, struct zwlr_export_dmabuf_frame_v1 * frame, uint32_t reason) {
+    ctx_t * ctx = (ctx_t *)data;
+    printf("[dmabuf_frame] cancel %d\n", reason);
+}
+
+static const struct zwlr_export_dmabuf_frame_v1_listener zwlr_export_dmabuf_frame_listener = {
+    .frame = zwlr_export_dmabuf_frame_frame,
+    .object = zwlr_export_dmabuf_frame_object,
+    .ready = zwlr_export_dmabuf_frame_ready,
+    .cancel = zwlr_export_dmabuf_frame_cancel
+};
+
+// --- wl_surface event handlers ---
+
+static void wl_surface_enter(void * data, struct wl_surface * surface, struct wl_output * output) {
+    ctx_t * ctx = (ctx_t *)data;
+    printf("[wl_surface] enter\n");
+
+    if (ctx->dmabuf_frame != NULL) {
+        zwlr_export_dmabuf_frame_v1_destroy(ctx->dmabuf_frame);
+    }
+
+    ctx->dmabuf_frame = zwlr_export_dmabuf_manager_v1_capture_output(ctx->export_dmabuf, 0, output);
+    zwlr_export_dmabuf_frame_v1_add_listener(ctx->dmabuf_frame, &zwlr_export_dmabuf_frame_listener, (void *)ctx);
+}
+
+static const struct wl_surface_listener wl_surface_listener = {
+    .enter = wl_surface_enter
+};
+
+// --- xdg_wm_base event handlers ---
+
+static void xdg_wm_base_event_ping(
+    void * data, struct xdg_wm_base * xdg_wm_base, uint32_t serial
+) {
+    ctx_t * ctx = (ctx_t *)data;
+    printf("[xdg_wm_base] ping %d\n", serial);
+    xdg_wm_base_pong(xdg_wm_base, serial);
+
+    (void)ctx;
+}
+
+static const struct xdg_wm_base_listener xdg_wm_base_listener = {
+    .ping = xdg_wm_base_event_ping
+};
+
+// --- configure callbacks ---
 
 static void resize_shm_buffer(ctx_t * ctx, enum wl_shm_format format, uint32_t width, uint32_t height, uint32_t stride) {
     uint32_t bytes_per_pixel = width / stride;
@@ -248,96 +373,6 @@ static void resize_shm_buffer(ctx_t * ctx, enum wl_shm_format format, uint32_t w
     }
 }
 
-static void zwlr_screencopy_frame_buffer_shm(void * data, struct zwlr_screencopy_frame_v1 * frame, enum wl_shm_format format, uint32_t width, uint32_t height, uint32_t stride) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer shm %dx%d+%d@%d\n", width, height, stride, format);
-
-    printf("[info] creating screencopy texture\n");
-    resize_shm_buffer(ctx, format, width, height, stride);
-}
-
-static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screencopy_frame_v1 * frame, uint32_t format, uint32_t width, uint32_t height) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer dmabuf %dx%d@%d\n", width, height, format);
-
-    printf("[info] ignoring (no dmabuf support)\n");
-}
-
-static void zwlr_screencopy_frame_buffer_done(void * data, struct zwlr_screencopy_frame_v1 * frame) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer_done\n");
-
-    zwlr_screencopy_frame_v1_copy(frame, ctx->shm_buffer);
-}
-
-static void zwlr_screencopy_frame_flags(void * data, struct zwlr_screencopy_frame_v1 * frame, enum zwlr_screencopy_frame_v1_flags flags) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] flags\n");
-}
-
-static void zwlr_screencopy_frame_ready(void * data, struct zwlr_screencopy_frame_v1 * frame, uint32_t sec_hi, uint32_t sec_lo, uint32_t nsec) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] ready\n");
-
-    printf("[info] attaching buffer to surface\n");
-    wl_surface_attach(ctx->surface, ctx->shm_buffer, 0, 0);
-
-    printf("[info] setting source viewport\n");
-    wp_viewport_set_source(ctx->viewport, 0, 0, wl_fixed_from_int(ctx->shm_width), wl_fixed_from_int(ctx->shm_height));
-
-    printf("[info] committing surface\n");
-    wl_surface_commit(ctx->surface);
-}
-
-static void zwlr_screencopy_frame_failed(void * data, struct zwlr_screencopy_frame_v1 * frame) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] failed\n");
-}
-
-static const struct zwlr_screencopy_frame_v1_listener zwlr_screencopy_frame_listener = {
-    .buffer = zwlr_screencopy_frame_buffer_shm,
-    .linux_dmabuf = zwlr_screencopy_frame_buffer_dmabuf,
-    .buffer_done = zwlr_screencopy_frame_buffer_done,
-    .flags = zwlr_screencopy_frame_flags,
-    .ready = zwlr_screencopy_frame_ready,
-    .failed = zwlr_screencopy_frame_failed
-};
-
-// --- wl_surface event handlers ---
-
-static void wl_surface_enter(void * data, struct wl_surface * surface, struct wl_output * output) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[wl_surface] enter\n");
-
-    if (ctx->screencopy_frame != NULL) {
-        zwlr_screencopy_frame_v1_destroy(ctx->screencopy_frame);
-    }
-
-    ctx->screencopy_frame = zwlr_screencopy_manager_v1_capture_output(ctx->screencopy, 0, output);
-    zwlr_screencopy_frame_v1_add_listener(ctx->screencopy_frame, &zwlr_screencopy_frame_listener, (void *)ctx);
-}
-
-static const struct wl_surface_listener wl_surface_listener = {
-    .enter = wl_surface_enter
-};
-
-// --- xdg_wm_base event handlers ---
-
-static void xdg_wm_base_event_ping(
-    void * data, struct xdg_wm_base * xdg_wm_base, uint32_t serial
-) {
-    ctx_t * ctx = (ctx_t *)data;
-    printf("[xdg_wm_base] ping %d\n", serial);
-    xdg_wm_base_pong(xdg_wm_base, serial);
-
-    (void)ctx;
-}
-
-static const struct xdg_wm_base_listener xdg_wm_base_listener = {
-    .ping = xdg_wm_base_event_ping
-};
-
-// --- configure callbacks ---
 
 static void surface_configure_resize(ctx_t * ctx, uint32_t width, uint32_t height) {
     if (ctx->shm_buffer == NULL) {
@@ -480,8 +515,10 @@ int main(void) {
     ctx->viewporter_id = 0;
     ctx->xdg_wm_base = NULL;
     ctx->xdg_wm_base_id = 0;
-    ctx->screencopy = NULL;
-    ctx->screencopy_id = 0;
+    ctx->linux_dmabuf = NULL;
+    ctx->linux_dmabuf_id = 0;
+    ctx->export_dmabuf = NULL;
+    ctx->export_dmabuf_id = 0;
     wl_list_init(&ctx->outputs);
 
     ctx->shm_pool = NULL;
@@ -491,6 +528,15 @@ int main(void) {
     ctx->shm_width = 0;
     ctx->shm_height = 0;
     ctx->shm_fd = -1;
+
+    ctx->dmabuf_params = NULL;
+    ctx->dmabuf_buffer = NULL;
+    ctx->dmabuf_width = 0;
+    ctx->dmabuf_height = 0;
+    ctx->dmabuf_format = 0;
+    ctx->dmabuf_modifier_lo = 0;
+    ctx->dmabuf_modifier_hi = 0;
+    ctx->dmabuf_flags = 0;
 
     ctx->surface = NULL;
     ctx->xdg_surface = NULL;
@@ -536,8 +582,11 @@ int main(void) {
     } else if (ctx->xdg_wm_base == NULL) {
         printf("[!] wl_registry: no xdg_wm_base found\n");
         exit_fail(ctx);
-    } else if (ctx->screencopy == NULL) {
-        printf("[!] wl_registry: no screencopy found\n");
+    } else if (ctx->linux_dmabuf == NULL) {
+        printf("[!] wl_registry: no linux_dmabuf found\n");
+        exit_fail(ctx);
+    } else if (ctx->export_dmabuf == NULL) {
+        printf("[!] wl_registry: no export_dmabuf found\n");
         exit_fail(ctx);
     }
 
