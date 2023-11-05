@@ -5,15 +5,29 @@ project(wayland-experiments C)
 
 # wayland protocols needed by the experiments
 set(PROTOCOLDIR "/usr/share/wayland-protocols/" CACHE STRING "wayland-protocols directory")
+set(WLRPROTOCOLDIR "${CMAKE_SOURCE_DIR}/wlr-protocols/" CACHE STRING "wlr-protocols directory")
 set(PROTOCOLS
     "stable/xdg-shell/xdg-shell.xml"
+    "stable/viewporter/viewporter.xml"
+    "unstable/wlr-screencopy-unstable-v1.xml"
 )
 
 # wayland protocol wrapper generation with wayland-scanner
 add_library(protocols STATIC)
 target_include_directories(protocols INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/proto/include/")
 foreach(proto ${PROTOCOLS})
-    cmake_path(APPEND PROTOCOLDIR ${proto} OUTPUT_VARIABLE protofile)
+    cmake_path(APPEND PROTOCOLDIR ${proto} OUTPUT_VARIABLE wl-protofile)
+    cmake_path(APPEND WLRPROTOCOLDIR ${proto} OUTPUT_VARIABLE wlr-protofile)
+    if(EXISTS ${wl-protofile})
+        message(STATUS "using ${proto} from wayland-protocols")
+        set(protofile ${wl-protofile})
+    elseif(EXISTS ${wlr-protofile})
+        message(STATUS "using ${proto} from wlr-protocols")
+        set(protofile ${wlr-protofile})
+    else()
+        message(FATAL_ERROR "protocol ${proto} not found")
+    endif()
+
     cmake_path(GET protofile STEM protobase)
     set(protoheader "${CMAKE_CURRENT_BINARY_DIR}/proto/include/${protobase}.h")
     set(protosource "${CMAKE_CURRENT_BINARY_DIR}/proto/src/${protobase}.c")
