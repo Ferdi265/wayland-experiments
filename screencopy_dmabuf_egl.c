@@ -569,6 +569,7 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
     ctx->dmabuf_width = width;
     ctx->dmabuf_height = height;
 
+    printf("[info] finding format modifiers\n");
     uint64_t * modifiers = NULL;
     size_t modifiers_length = 0;
     dmabuf_format_modifiers_t *entry;
@@ -585,6 +586,7 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
         exit_fail(ctx);
     }
 
+    printf("[info] creating gbm buffer object\n");
     ctx->gbm_bo = gbm_bo_create_with_modifiers2(ctx->gbm_main_device,
         width, height, format,
         modifiers, modifiers_length,
@@ -636,9 +638,11 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
 
     image_attribs[i++] = EGL_NONE;
 
+    printf("[info] destroying gbm buffer object\n");
     gbm_bo_destroy(ctx->gbm_bo);
     ctx->gbm_bo = NULL;
 
+    printf("[info] creating dmabuf wl_buffer object\n");
     ctx->dmabuf_buffer = zwp_linux_buffer_params_v1_create_immed(params, width, height, format, 0);
     zwp_linux_buffer_params_v1_destroy(params);
 }
