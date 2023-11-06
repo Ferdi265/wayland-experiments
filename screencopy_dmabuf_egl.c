@@ -49,6 +49,12 @@ typedef struct {
 } dmabuf_format_table_entry_t;
 
 typedef struct {
+    uint32_t drm_format;
+    struct wl_array /*uint64_t*/ modifiers;
+    struct wl_list link;
+} dmabuf_format_modifiers_t;
+
+typedef struct {
     struct wl_display * display;
     struct wl_registry * registry;
 
@@ -84,6 +90,7 @@ typedef struct {
     dmabuf_format_table_entry_t * dmabuf_format_table;
     uint32_t dmabuf_format_table_length;
     bool gbm_tranche_device_is_main_device;
+    struct wl_list /*dmabuf_format_modifiers_t*/ dmabuf_format_modifiers;
 
     struct wl_surface * surface;
     struct wp_viewport * viewport;
@@ -134,6 +141,13 @@ static void cleanup(ctx_t * ctx) {
     if (ctx->dmabuf_format_table != NULL) munmap(ctx->dmabuf_format_table, ctx->dmabuf_format_table_length * sizeof (dmabuf_format_table_entry_t));
     if (ctx->gbm_bo != NULL) gbm_bo_destroy(ctx->gbm_bo);
     if (ctx->gbm_main_device != NULL) gbm_device_destroy(ctx->gbm_main_device);
+
+    dmabuf_format_modifiers_t *entry, *entry_next;
+    wl_list_for_each_safe(entry, entry_next, &ctx->dmabuf_format_modifiers, link) {
+        wl_list_remove(&entry->link);
+        wl_array_release(&entry->modifiers);
+        free(entry);
+    }
 
     if (ctx->shm_buffer != NULL) wl_buffer_destroy(ctx->shm_buffer);
     if (ctx->shm_pool != NULL) wl_shm_pool_destroy(ctx->shm_pool);
@@ -446,6 +460,25 @@ static void linux_dmabuf_feedback_tranche_formats(void * data, struct zwp_linux_
         uint32_t drm_format = ctx->dmabuf_format_table[*index].drm_format;
         uint64_t modifier = ctx->dmabuf_format_table[*index].modifier;
         printf("[info] format modifier pair: %c%c%c%c %lx\n", PRINT_DRM_FORMAT(drm_format), modifier);
+
+        bool found = false;
+        dmabuf_format_modifiers_t * entry;
+        wl_list_for_each(entry, &ctx->dmabuf_format_modifiers, link) {
+            if (entry->drm_format == drm_format) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            entry = malloc(sizeof (dmabuf_format_modifiers_t));
+            entry->drm_format = drm_format;
+            wl_array_init(&entry->modifiers);
+            wl_list_insert(&ctx->dmabuf_format_modifiers, &entry->link);
+        }
+
+        wl_array_add(&entry->modifiers, sizeof (uint64_t));
+        memcpy(entry->modifiers.data + entry->modifiers.size - sizeof (uint64_t), &modifier, sizeof (uint64_t));
     }
 }
 
@@ -536,10 +569,25 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
     ctx->dmabuf_width = width;
     ctx->dmabuf_height = height;
 
-    uint64_t modifiers[] = { DRM_FORMAT_MOD_LINEAR, I915_FORMAT_MOD_X_TILED, I915_FORMAT_MOD_Y_TILED, I915_FORMAT_MOD_Y_TILED_CCS, DRM_FORMAT_MOD_INVALID };
+    uint64_t * modifiers = NULL;
+    size_t modifiers_length = 0;
+    dmabuf_format_modifiers_t *entry;
+    wl_list_for_each(entry, &ctx->dmabuf_format_modifiers, link) {
+        if (entry->drm_format == format) {
+            modifiers = (uint64_t *)entry->modifiers.data;
+            modifiers_length = entry->modifiers.size / sizeof (uint64_t);
+            break;
+        }
+    }
+
+    if (modifiers == NULL) {
+        printf("[error] format unsupported\n");
+        exit_fail(ctx);
+    }
+
     ctx->gbm_bo = gbm_bo_create_with_modifiers2(ctx->gbm_main_device,
         width, height, format,
-        modifiers, sizeof modifiers / sizeof (uint64_t),
+        modifiers, modifiers_length,
         GBM_BO_USE_RENDERING
     );
 
@@ -944,6 +992,7 @@ int main(void) {
     ctx->dmabuf_format_table = NULL;
     ctx->dmabuf_format_table_length = 0;
     ctx->gbm_tranche_device_is_main_device = false;
+    wl_list_init(&ctx->dmabuf_format_modifiers);
 
     ctx->surface = NULL;
     ctx->xdg_surface = NULL;
