@@ -68,7 +68,7 @@ foreach(proto ${PROTOCOLS})
 endforeach()
 
 # eample targets
-file(GLOB experiments *.c)
+file(GLOB experiments CONFIGURE_DEPENDS *.c)
 foreach(experiment ${experiments})
     cmake_path(GET experiment STEM name)
     add_executable(${name} ${experiment})
