@@ -79,6 +79,9 @@ static void cleanup(ctx_t * ctx) {
     if (ctx->viewport != NULL) wp_viewport_destroy(ctx->viewport);
     if (ctx->surface != NULL) wl_surface_destroy(ctx->surface);
 
+    if (ctx->dmabuf_buffer != NULL) wl_buffer_destroy(ctx->dmabuf_buffer);
+    if (ctx->dmabuf_params != NULL) zwp_linux_buffer_params_v1_destroy(ctx->dmabuf_params);
+
     if (ctx->shm_buffer != NULL) wl_buffer_destroy(ctx->shm_buffer);
     if (ctx->shm_pool != NULL) wl_shm_pool_destroy(ctx->shm_pool);
     if (ctx->shm_pixels != NULL) munmap(ctx->shm_pixels, ctx->shm_size);
