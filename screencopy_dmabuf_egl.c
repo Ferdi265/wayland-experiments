@@ -636,6 +636,9 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
 
     image_attribs[i++] = EGL_NONE;
 
+    gbm_bo_destroy(ctx->gbm_bo);
+    ctx->gbm_bo = NULL;
+
     ctx->dmabuf_buffer = zwp_linux_buffer_params_v1_create_immed(params, width, height, format, 0);
     zwp_linux_buffer_params_v1_destroy(params);
 }

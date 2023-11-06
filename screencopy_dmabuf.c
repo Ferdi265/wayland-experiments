@@ -541,6 +541,9 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
         printf("[info] plane %d: offset %d, stride %d\n", plane, gbm_bo_get_offset(ctx->gbm_bo, plane), gbm_bo_get_stride_for_plane(ctx->gbm_bo, plane));
     }
 
+    gbm_bo_destroy(ctx->gbm_bo);
+    ctx->gbm_bo = NULL;
+
     ctx->dmabuf_buffer = zwp_linux_buffer_params_v1_create_immed(params, width, height, format, 0);
     zwp_linux_buffer_params_v1_destroy(params);
 }
