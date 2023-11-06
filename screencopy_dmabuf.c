@@ -14,6 +14,7 @@
 #include <linux-dmabuf-unstable-v1.h>
 #include <wlr-screencopy-unstable-v1.h>
 #include <xf86drm.h>
+#include <drm_fourcc.h>
 #include <gbm.h>
 #include <fcntl.h>
 
@@ -22,6 +23,24 @@ typedef struct {
     size_t id;
     struct wl_list link;
 } output_t;
+
+#define PRINT_DRM_FORMAT(drm_format) \
+    ((drm_format) >>  0) & 0xff, \
+    ((drm_format) >>  8) & 0xff, \
+    ((drm_format) >> 16) & 0xff, \
+    ((drm_format) >> 24) & 0xff
+
+#define PRINT_WL_SHM_FORMAT(wl_shm_format) PRINT_DRM_FORMAT(\
+    (wl_shm_format) == WL_SHM_FORMAT_ARGB8888 ? DRM_FORMAT_ARGB8888 : \
+    (wl_shm_format) == WL_SHM_FORMAT_XRGB8888 ? DRM_FORMAT_XRGB8888 : \
+    (wl_shm_format) \
+)\
+
+typedef struct {
+    uint32_t drm_format;
+    uint32_t _padding;
+    uint64_t modifier;
+} dmabuf_format_table_entry_t;
 
 typedef struct {
     struct wl_display * display;
@@ -50,14 +69,15 @@ typedef struct {
     int shm_fd;
 
     struct zwp_linux_dmabuf_feedback_v1 * dmabuf_feedback;
-    struct zwp_linux_buffer_params_v1 * dmabuf_params;
     struct wl_buffer * dmabuf_buffer;
     uint32_t dmabuf_width;
     uint32_t dmabuf_height;
-    uint32_t dmabuf_format;
-    uint32_t dmabuf_modifier_lo;
-    uint32_t dmabuf_modifier_hi;
-    uint32_t dmabuf_flags;
+
+    struct gbm_device * gbm_main_device;
+    struct gbm_bo * gbm_bo;
+    dmabuf_format_table_entry_t * dmabuf_format_table;
+    uint32_t dmabuf_format_table_length;
+    bool gbm_tranche_device_is_main_device;
 
     struct wl_surface * surface;
     struct wp_viewport * viewport;
@@ -84,8 +104,11 @@ static void cleanup(ctx_t * ctx) {
     if (ctx->surface != NULL) wl_surface_destroy(ctx->surface);
 
     if (ctx->dmabuf_buffer != NULL) wl_buffer_destroy(ctx->dmabuf_buffer);
-    if (ctx->dmabuf_params != NULL) zwp_linux_buffer_params_v1_destroy(ctx->dmabuf_params);
     if (ctx->dmabuf_feedback != NULL) zwp_linux_dmabuf_feedback_v1_destroy(ctx->dmabuf_feedback);
+
+    if (ctx->dmabuf_format_table != NULL) munmap(ctx->dmabuf_format_table, ctx->dmabuf_format_table_length * sizeof (dmabuf_format_table_entry_t));
+    if (ctx->gbm_bo != NULL) gbm_bo_destroy(ctx->gbm_bo);
+    if (ctx->gbm_main_device != NULL) gbm_device_destroy(ctx->gbm_main_device);
 
     if (ctx->shm_buffer != NULL) wl_buffer_destroy(ctx->shm_buffer);
     if (ctx->shm_pool != NULL) wl_shm_pool_destroy(ctx->shm_pool);
@@ -233,7 +256,7 @@ static const struct wl_registry_listener registry_listener = {
 
 // --- linux dmabuf event handlers ---
 
-struct gbm_device * gbm_device_create(ctx_t * ctx, drmDevice *device) {
+static struct gbm_device * create_gbm_device(ctx_t * ctx, drmDevice *device) {
     drmDevice *devices[64];
     char * render_node = NULL;
 
@@ -254,14 +277,16 @@ struct gbm_device * gbm_device_create(ctx_t * ctx, drmDevice *device) {
 
     if (render_node == NULL) {
         printf("[error] could not find render node\n");
-        exit_fail(ctx);
+        free(render_node);
+        return NULL;
     }
     printf("[info] using render node %s\n", render_node);
 
     int fd = open(render_node, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
         printf("[error] could not open render node\n");
-        exit_fail(ctx);
+        free(render_node);
+        return NULL;
     }
 
     free(render_node);
@@ -272,32 +297,138 @@ static void linux_dmabuf_feedback_main_device(void * data, struct zwp_linux_dmab
     ctx_t * ctx = (ctx_t *)data;
     printf("[linux_dmabuf_feedback] main device\n");
 
-    
+    if (ctx->gbm_main_device != NULL) {
+        gbm_device_destroy(ctx->gbm_main_device);
+    }
+
+    if (device->size != sizeof (dev_t)) {
+        printf("[error] array size mismatch: %zd != %zd\n", device->size, sizeof (dev_t));
+        exit_fail(ctx);
+    }
+
+    dev_t device_id;
+    memcpy(&device_id, device->data, sizeof (dev_t));
+
+    drmDevice * drm_device;
+    if (drmGetDeviceFromDevId(device_id, 0, &drm_device) != 0) {
+        printf("[error] failed to open drm device\n");
+        return;
+    }
+
+    ctx->gbm_main_device = create_gbm_device(ctx, drm_device);
+    if (ctx->gbm_main_device == NULL) {
+        printf("[error] failed to open gbm device\n");
+    }
+
+    drmFreeDevices(&drm_device, 1);
 }
 
 static void linux_dmabuf_feedback_format_table(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback, int fd, uint32_t size) {
     ctx_t * ctx = (ctx_t *)data;
     printf("[linux_dmabuf_feedback] format table %d (%d bytes)\n", fd, size);
+
+    if (size % sizeof (dmabuf_format_table_entry_t) != 0) {
+        printf("[error] dmabuf format table is not a whole number of entries\n");
+        exit_fail(ctx);
+    }
+
+    if (ctx->dmabuf_format_table != NULL) {
+        munmap(ctx->dmabuf_format_table, ctx->dmabuf_format_table_length * sizeof (dmabuf_format_table_entry_t));
+    }
+
+    ctx->dmabuf_format_table = (dmabuf_format_table_entry_t *)mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    ctx->dmabuf_format_table_length = size / sizeof (dmabuf_format_table_entry_t);
+    if (ctx->dmabuf_format_table == MAP_FAILED) {
+        printf("[error] failed to map format table\n");
+        ctx->dmabuf_format_table = NULL;
+        exit_fail(ctx);
+    }
 }
 
 static void linux_dmabuf_feedback_tranche_target_device(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback, struct wl_array * device) {
     ctx_t * ctx = (ctx_t *)data;
     printf("[linux_dmabuf_feedback] tranche target device\n");
+
+    if (device->size != sizeof (dev_t)) {
+        printf("[error] array size mismatch: %zd != %zd\n", device->size, sizeof (dev_t));
+        exit_fail(ctx);
+    }
+
+    dev_t device_id;
+    memcpy(&device_id, device->data, sizeof (dev_t));
+
+    drmDevice * drm_device;
+    if (drmGetDeviceFromDevId(device_id, 0, &drm_device) != 0) {
+        printf("[error] failed to open drm device\n");
+        return;
+    }
+
+    if (ctx->gbm_main_device != NULL) {
+        drmDevice * drm_main_device;
+        drmGetDevice2(gbm_device_get_fd(ctx->gbm_main_device), 0, &drm_main_device);
+        ctx->gbm_tranche_device_is_main_device = drmDevicesEqual(drm_main_device, drm_device);
+        drmFreeDevices(&drm_main_device, 1);
+
+        if (!ctx->gbm_tranche_device_is_main_device) {
+            printf("[error] tranche device is not main device\n");
+        }
+    } else {
+        printf("[info] no main device, using tranche device\n");
+        ctx->gbm_main_device = create_gbm_device(ctx, drm_device);
+        ctx->gbm_tranche_device_is_main_device = ctx->gbm_main_device != NULL;
+
+        if (ctx->gbm_main_device == NULL) {
+            printf("[error] failed to open gbm device\n");
+        }
+    }
+
+    drmFreeDevices(&drm_device, 1);
 }
 
 static void linux_dmabuf_feedback_tranche_flags(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback, enum zwp_linux_dmabuf_feedback_v1_tranche_flags flags) {
     ctx_t * ctx = (ctx_t *)data;
-    printf("[linux_dmabuf_feedback] tranche flags %d\n", flags);
+    printf("[linux_dmabuf_feedback] tranche flags: { %s }\n",
+        flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SCANOUT ? "scanout" : ""
+    );
 }
 
 static void linux_dmabuf_feedback_tranche_formats(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback, struct wl_array * indices) {
     ctx_t * ctx = (ctx_t *)data;
     printf("[linux_dmabuf_feedback] tranche formats\n");
+
+    if (indices->size % sizeof (uint16_t) != 0) {
+        printf("[error] index array size is not a whole number of indices\n");
+        exit_fail(ctx);
+    }
+
+    if (ctx->dmabuf_format_table == NULL) {
+        printf("[error] missing format table\n");
+        return;
+    }
+
+    if (!ctx->gbm_tranche_device_is_main_device) {
+        printf("[error] tranche device is not main device\n");
+        return;
+    }
+
+    uint16_t * index;
+    wl_array_for_each(index, indices) {
+        if (*index >= ctx->dmabuf_format_table_length) {
+            printf("[error] format index is out of bounds of format table (%d >= %d)\n", *index, ctx->dmabuf_format_table_length);
+            exit_fail(ctx);
+        }
+
+        uint32_t drm_format = ctx->dmabuf_format_table[*index].drm_format;
+        uint64_t modifier = ctx->dmabuf_format_table[*index].modifier;
+        printf("[info] format modifier pair: %c%c%c%c %lx\n", PRINT_DRM_FORMAT(drm_format), modifier);
+    }
 }
 
 static void linux_dmabuf_feedback_tranche_done(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback) {
     ctx_t * ctx = (ctx_t *)data;
     printf("[linux_dmabuf_feedback] tranche done\n");
+
+    ctx->gbm_tranche_device_is_main_device = false;
 }
 
 static void linux_dmabuf_feedback_done(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback) {
@@ -319,18 +450,49 @@ static const struct zwp_linux_dmabuf_feedback_v1_listener linux_dmabuf_feedback_
 
 static void zwlr_screencopy_frame_buffer_shm(void * data, struct zwlr_screencopy_frame_v1 * frame, enum wl_shm_format format, uint32_t width, uint32_t height, uint32_t stride) {
     ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer shm %dx%d+%d@%d\n", width, height, stride, format);
+    printf("[zwlr_screencopy_frame] buffer shm %dx%d+%d@%c%c%c%c\n", width, height, stride, PRINT_WL_SHM_FORMAT(format));
 
     printf("[info] ignoring (no shm support)\n");
 }
 
 static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screencopy_frame_v1 * frame, uint32_t format, uint32_t width, uint32_t height) {
     ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer dmabuf %dx%d@%d\n", width, height, format);
+    printf("[zwlr_screencopy_frame] buffer dmabuf %dx%d@%c%c%c%c\n", width, height, PRINT_DRM_FORMAT(format));
+
+    if (ctx->dmabuf_buffer != NULL) {
+        wl_buffer_destroy(ctx->dmabuf_buffer);
+    }
+
+    if (ctx->gbm_bo != NULL) {
+        gbm_bo_destroy(ctx->gbm_bo);
+    }
 
     ctx->dmabuf_width = width;
     ctx->dmabuf_height = height;
-    ctx->dmabuf_format = format;
+
+    uint64_t modifiers[] = { DRM_FORMAT_MOD_LINEAR, I915_FORMAT_MOD_X_TILED, I915_FORMAT_MOD_Y_TILED, I915_FORMAT_MOD_Y_TILED_CCS, DRM_FORMAT_MOD_INVALID };
+    ctx->gbm_bo = gbm_bo_create_with_modifiers2(ctx->gbm_main_device,
+        width, height, format,
+        modifiers, sizeof modifiers / sizeof (uint64_t),
+        GBM_BO_USE_RENDERING
+    );
+
+    struct zwp_linux_buffer_params_v1 * params = zwp_linux_dmabuf_v1_create_params(ctx->linux_dmabuf);
+
+    for (int plane = 0; plane < gbm_bo_get_plane_count(ctx->gbm_bo); plane++) {
+        zwp_linux_buffer_params_v1_add(
+            params,
+            gbm_bo_get_fd_for_plane(ctx->gbm_bo, plane),
+            plane,
+            gbm_bo_get_offset(ctx->gbm_bo, plane),
+            gbm_bo_get_stride_for_plane(ctx->gbm_bo, plane),
+            gbm_bo_get_modifier(ctx->gbm_bo) >> 32,
+            gbm_bo_get_modifier(ctx->gbm_bo)
+        );
+    }
+
+    ctx->dmabuf_buffer = zwp_linux_buffer_params_v1_create_immed(params, width, height, format, 0);
+    zwp_linux_buffer_params_v1_destroy(params);
 }
 
 static void zwlr_screencopy_frame_buffer_done(void * data, struct zwlr_screencopy_frame_v1 * frame) {
@@ -350,10 +512,10 @@ static void zwlr_screencopy_frame_ready(void * data, struct zwlr_screencopy_fram
     printf("[zwlr_screencopy_frame] ready\n");
 
     printf("[info] attaching buffer to surface\n");
-    wl_surface_attach(ctx->surface, ctx->shm_buffer, 0, 0);
+    wl_surface_attach(ctx->surface, ctx->dmabuf_buffer, 0, 0);
 
     printf("[info] setting source viewport\n");
-    wp_viewport_set_source(ctx->viewport, 0, 0, wl_fixed_from_int(ctx->shm_width), wl_fixed_from_int(ctx->shm_height));
+    wp_viewport_set_source(ctx->viewport, 0, 0, wl_fixed_from_int(ctx->dmabuf_width), wl_fixed_from_int(ctx->dmabuf_height));
 
     printf("[info] committing surface\n");
     wl_surface_commit(ctx->surface);
@@ -613,14 +775,13 @@ int main(void) {
     ctx->shm_fd = -1;
 
     ctx->dmabuf_feedback = NULL;
-    ctx->dmabuf_params = NULL;
     ctx->dmabuf_buffer = NULL;
-    ctx->dmabuf_width = 0;
-    ctx->dmabuf_height = 0;
-    ctx->dmabuf_format = 0;
-    ctx->dmabuf_modifier_lo = 0;
-    ctx->dmabuf_modifier_hi = 0;
-    ctx->dmabuf_flags = 0;
+
+    ctx->gbm_main_device = NULL;
+    ctx->gbm_bo = NULL;
+    ctx->dmabuf_format_table = NULL;
+    ctx->dmabuf_format_table_length = 0;
+    ctx->gbm_tranche_device_is_main_device = false;
 
     ctx->surface = NULL;
     ctx->xdg_surface = NULL;
