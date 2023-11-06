@@ -3,6 +3,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(wayland-experiments C)
 
+include(FindPkgConfig)
+pkg_check_modules(LibDRM REQUIRED IMPORTED_TARGET "libdrm")
+pkg_check_modules(LibGBM REQUIRED IMPORTED_TARGET "gbm")
+
 # wayland protocols needed by the experiments
 set(PROTOCOLDIR "/usr/share/wayland-protocols/" CACHE STRING "wayland-protocols directory")
 set(WLRPROTOCOLDIR "${CMAKE_SOURCE_DIR}/wlr-protocols/" CACHE STRING "wlr-protocols directory")
@@ -60,5 +64,5 @@ file(GLOB experiments *.c)
 foreach(experiment ${experiments})
     cmake_path(GET experiment STEM name)
     add_executable(${name} ${experiment})
-    target_link_libraries(${name} PRIVATE wayland-client protocols)
+    target_link_libraries(${name} PRIVATE wayland-client protocols PkgConfig::LibDRM PkgConfig::LibGBM)
 endforeach()
