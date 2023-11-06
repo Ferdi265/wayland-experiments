@@ -335,7 +335,7 @@ static void zwlr_screencopy_frame_ready(void * data, struct zwlr_screencopy_fram
     glClear(GL_COLOR_BUFFER_BIT);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    printf("[info] swapping buffers");
+    printf("[info] swapping buffers\n");
     if (eglSwapBuffers(ctx->egl_display, ctx->egl_surface) != EGL_TRUE) {
         printf("[!] eglSwapBuffers: failed to swap buffers\n");
         exit_fail(ctx);
