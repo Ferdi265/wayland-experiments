@@ -271,6 +271,8 @@ struct gbm_device * gbm_device_create(ctx_t * ctx, drmDevice *device) {
 static void linux_dmabuf_feedback_main_device(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback, struct wl_array * device) {
     ctx_t * ctx = (ctx_t *)data;
     printf("[linux_dmabuf_feedback] main device\n");
+
+    
 }
 
 static void linux_dmabuf_feedback_format_table(void * data, struct zwp_linux_dmabuf_feedback_v1 * feedback, int fd, uint32_t size) {
@@ -623,6 +625,7 @@ int main(void) {
     ctx->surface = NULL;
     ctx->xdg_surface = NULL;
     ctx->xdg_toplevel = NULL;
+    ctx->screencopy_frame = NULL;
 
     ctx->last_surface_serial = 0;
     ctx->win_width = 0;

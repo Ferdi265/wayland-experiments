@@ -544,6 +544,7 @@ int main(void) {
     ctx->surface = NULL;
     ctx->xdg_surface = NULL;
     ctx->xdg_toplevel = NULL;
+    ctx->dmabuf_frame = NULL;
 
     ctx->last_surface_serial = 0;
     ctx->win_width = 0;
