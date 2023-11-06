@@ -89,6 +89,9 @@ typedef struct {
 static void cleanup(ctx_t * ctx) {
     printf("[info] cleaning up\n");
 
+    if (ctx->egl_shader_program != 0) glDeleteProgram(ctx->egl_shader_program);
+    if (ctx->egl_texture != 0) glDeleteTextures(1, &ctx->egl_texture);
+    if (ctx->egl_vbo != 0) glDeleteBuffers(1, &ctx->egl_vbo);
     if (ctx->egl_context != EGL_NO_SURFACE) eglDestroyContext(ctx->egl_display, ctx->egl_context);
     if (ctx->egl_surface != EGL_NO_SURFACE) eglDestroySurface(ctx->egl_display, ctx->egl_surface);
     if (ctx->egl_window != EGL_NO_SURFACE) wl_egl_window_destroy(ctx->egl_window);
@@ -590,6 +593,9 @@ int main(void) {
     ctx->egl_context = EGL_NO_CONTEXT;
     ctx->egl_surface = EGL_NO_SURFACE;
     ctx->egl_window = EGL_NO_SURFACE;
+    ctx->egl_vbo = -1;
+    ctx->egl_texture = -1;
+    ctx->egl_shader_program = -1;
 
     ctx->last_surface_serial = 0;
     ctx->win_width = 0;
