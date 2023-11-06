@@ -4,8 +4,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(wayland-experiments C)
 
 include(FindPkgConfig)
+pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET "wayland-client")
+pkg_check_modules(WaylandEGL REQUIRED IMPORTED_TARGET "wayland-egl")
 pkg_check_modules(LibDRM REQUIRED IMPORTED_TARGET "libdrm")
 pkg_check_modules(LibGBM REQUIRED IMPORTED_TARGET "gbm")
+pkg_check_modules(EGL REQUIRED IMPORTED_TARGET "egl")
+pkg_check_modules(GLESv2 REQUIRED IMPORTED_TARGET "glesv2")
+pkg_check_modules(WaylandScanner REQUIRED "wayland-scanner")
+pkg_get_variable(WAYLAND_SCANNER "wayland-scanner" "wayland_scanner")
 
 # wayland protocols needed by the experiments
 set(PROTOCOLDIR "/usr/share/wayland-protocols/" CACHE STRING "wayland-protocols directory")
@@ -20,7 +26,9 @@ set(PROTOCOLS
 
 # wayland protocol wrapper generation with wayland-scanner
 add_library(protocols STATIC)
+target_link_libraries(protocols PRIVATE PkgConfig::WaylandClient)
 target_include_directories(protocols INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/proto/include/")
+
 foreach(proto ${PROTOCOLS})
     cmake_path(APPEND PROTOCOLDIR ${proto} OUTPUT_VARIABLE wl-protofile)
     cmake_path(APPEND WLRPROTOCOLDIR ${proto} OUTPUT_VARIABLE wlr-protofile)
@@ -43,12 +51,12 @@ foreach(proto ${PROTOCOLS})
     add_custom_command(
         OUTPUT "${protoheader}"
         MAIN_DEPENDENCY "${protofile}"
-        COMMAND wayland-scanner client-header "${protofile}" "${protoheader}"
+        COMMAND ${WAYLAND_SCANNER} client-header "${protofile}" "${protoheader}"
     )
     add_custom_command(
         OUTPUT "${protosource}"
         MAIN_DEPENDENCY "${protofile}"
-        COMMAND wayland-scanner private-code "${protofile}" "${protosource}"
+        COMMAND ${WAYLAND_SCANNER} private-code "${protofile}" "${protosource}"
     )
     add_custom_target(gen-${protobase} DEPENDS "${protoheader}" "${protosource}")
 
@@ -64,5 +72,10 @@ file(GLOB experiments *.c)
 foreach(experiment ${experiments})
     cmake_path(GET experiment STEM name)
     add_executable(${name} ${experiment})
-    target_link_libraries(${name} PRIVATE wayland-client protocols PkgConfig::LibDRM PkgConfig::LibGBM)
+    target_link_libraries(${name} PRIVATE
+        protocols
+        PkgConfig::WaylandClient
+        PkgConfig::LibDRM PkgConfig::LibGBM
+        PkgConfig::WaylandEGL PkgConfig::EGL PkgConfig::GLESv2
+    )
 endforeach()
