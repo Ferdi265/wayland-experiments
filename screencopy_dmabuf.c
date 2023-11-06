@@ -478,6 +478,7 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
     );
 
     struct zwp_linux_buffer_params_v1 * params = zwp_linux_dmabuf_v1_create_params(ctx->linux_dmabuf);
+    printf("[info] dmabuf %dx%d@%c%c%c%c with modifier %lx\n", width, height, PRINT_DRM_FORMAT(format), gbm_bo_get_modifier(ctx->gbm_bo));
 
     for (int plane = 0; plane < gbm_bo_get_plane_count(ctx->gbm_bo); plane++) {
         zwp_linux_buffer_params_v1_add(
@@ -489,6 +490,7 @@ static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screenc
             gbm_bo_get_modifier(ctx->gbm_bo) >> 32,
             gbm_bo_get_modifier(ctx->gbm_bo)
         );
+        printf("[info] plane %d: offset %d, stride %d\n", plane, gbm_bo_get_offset(ctx->gbm_bo, plane), gbm_bo_get_stride_for_plane(ctx->gbm_bo, plane));
     }
 
     ctx->dmabuf_buffer = zwp_linux_buffer_params_v1_create_immed(params, width, height, format, 0);
