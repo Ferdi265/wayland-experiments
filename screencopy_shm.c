@@ -12,12 +12,25 @@
 #include <viewporter.h>
 #include <xdg-shell.h>
 #include <wlr-screencopy-unstable-v1.h>
+#include <drm_fourcc.h>
 
 typedef struct {
     struct wl_output * proxy;
     size_t id;
     struct wl_list link;
 } output_t;
+
+#define PRINT_DRM_FORMAT(drm_format) \
+    ((drm_format) >>  0) & 0xff, \
+    ((drm_format) >>  8) & 0xff, \
+    ((drm_format) >> 16) & 0xff, \
+    ((drm_format) >> 24) & 0xff
+
+#define PRINT_WL_SHM_FORMAT(wl_shm_format) PRINT_DRM_FORMAT(\
+    (wl_shm_format) == WL_SHM_FORMAT_ARGB8888 ? DRM_FORMAT_ARGB8888 : \
+    (wl_shm_format) == WL_SHM_FORMAT_XRGB8888 ? DRM_FORMAT_XRGB8888 : \
+    (wl_shm_format) \
+)
 
 typedef struct {
     struct wl_display * display;
@@ -250,7 +263,7 @@ static void resize_shm_buffer(ctx_t * ctx, enum wl_shm_format format, uint32_t w
 
 static void zwlr_screencopy_frame_buffer_shm(void * data, struct zwlr_screencopy_frame_v1 * frame, enum wl_shm_format format, uint32_t width, uint32_t height, uint32_t stride) {
     ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer shm %dx%d+%d@%d\n", width, height, stride, format);
+    printf("[zwlr_screencopy_frame] buffer shm %dx%d+%d@%c%c%c%c\n", width, height, stride, PRINT_WL_SHM_FORMAT(format));
 
     printf("[info] creating screencopy texture\n");
     resize_shm_buffer(ctx, format, width, height, stride);
@@ -258,7 +271,7 @@ static void zwlr_screencopy_frame_buffer_shm(void * data, struct zwlr_screencopy
 
 static void zwlr_screencopy_frame_buffer_dmabuf(void * data, struct zwlr_screencopy_frame_v1 * frame, uint32_t format, uint32_t width, uint32_t height) {
     ctx_t * ctx = (ctx_t *)data;
-    printf("[zwlr_screencopy_frame] buffer dmabuf %dx%d@%d\n", width, height, format);
+    printf("[zwlr_screencopy_frame] buffer dmabuf %dx%d@%c%c%c%c\n", width, height, PRINT_DRM_FORMAT(format));
 
     printf("[info] ignoring (no dmabuf support)\n");
 }

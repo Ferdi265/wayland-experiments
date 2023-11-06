@@ -34,7 +34,7 @@ typedef struct {
     (wl_shm_format) == WL_SHM_FORMAT_ARGB8888 ? DRM_FORMAT_ARGB8888 : \
     (wl_shm_format) == WL_SHM_FORMAT_XRGB8888 ? DRM_FORMAT_XRGB8888 : \
     (wl_shm_format) \
-)\
+)
 
 typedef struct {
     uint32_t drm_format;

@@ -13,12 +13,19 @@
 #include <xdg-shell.h>
 #include <linux-dmabuf-unstable-v1.h>
 #include <wlr-export-dmabuf-unstable-v1.h>
+#include <drm_fourcc.h>
 
 typedef struct {
     struct wl_output * proxy;
     size_t id;
     struct wl_list link;
 } output_t;
+
+#define PRINT_DRM_FORMAT(drm_format) \
+    ((drm_format) >>  0) & 0xff, \
+    ((drm_format) >>  8) & 0xff, \
+    ((drm_format) >> 16) & 0xff, \
+    ((drm_format) >> 24) & 0xff
 
 typedef struct {
     struct wl_display * display;
@@ -232,7 +239,7 @@ static void zwlr_export_dmabuf_frame_frame(void * data, struct zwlr_export_dmabu
     uint32_t width, uint32_t height, uint32_t offset_x, uint32_t offset_y, uint32_t buffer_flags, uint32_t flags, uint32_t format, uint32_t modifier_hi, uint32_t modifier_lo, uint32_t num_objects
 ) {
     ctx_t * ctx = (ctx_t *)data;
-    printf("[dmabuf_frame] frame %dx%d+%d+%d@(%d,%d,%d,%d,%d)*%d\n", width, height, offset_x, offset_y, format, modifier_hi, modifier_lo, buffer_flags, flags, num_objects);
+    printf("[dmabuf_frame] frame %dx%d+%d+%d@%c%c%c%c with modifier %lx, buffer flags %x, flags %x, planes %d\n", width, height, offset_x, offset_y, PRINT_DRM_FORMAT(format), ((uint64_t)modifier_hi << 32) | modifier_lo, buffer_flags, flags, num_objects);
 
     if (ctx->dmabuf_params != NULL) {
         zwp_linux_buffer_params_v1_destroy(ctx->dmabuf_params);
