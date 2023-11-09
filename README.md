@@ -33,6 +33,7 @@ export-dmabuf protocols, and especially around how to handle DMA-BUFs.
 - `surface.c`: create a surface
 - `xdg_surface.c`: create an XDG surface and toplevel
 - `application.c`: create a shm pool and buffer, and configure the window
+- `fractional_scale_checkerboard.c`: render a pixel checkerboard in a client that supports fractional scale
 - `egl.c`: create an egl window and configure a window, rendering a yellow screen
 - `screencopy_shm.c`: capture one frame with screencopy and display it using a shm buffer
 - `screencopy_dmabuf.c`: capture one frame with screencopy and display it using a dmabuf buffer

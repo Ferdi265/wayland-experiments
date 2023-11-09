@@ -3,6 +3,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(wayland-experiments C)
 
+find_library(LibM_PATH m REQUIRED)
+add_library(LibM STATIC IMPORTED)
+set_target_properties(LibM PROPERTIES IMPORTED_LOCATION ${LibM_PATH})
+
 include(FindPkgConfig)
 pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET "wayland-client")
 pkg_check_modules(WaylandEGL REQUIRED IMPORTED_TARGET "wayland-egl")
@@ -19,6 +23,7 @@ set(WLRPROTOCOLDIR "${CMAKE_SOURCE_DIR}/wlr-protocols/" CACHE STRING "wlr-protoc
 set(PROTOCOLS
     "stable/xdg-shell/xdg-shell.xml"
     "stable/viewporter/viewporter.xml"
+    "staging/fractional-scale/fractional-scale-v1.xml"
     "unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml"
     "unstable/wlr-screencopy-unstable-v1.xml"
     "unstable/wlr-export-dmabuf-unstable-v1.xml"
@@ -73,7 +78,7 @@ foreach(experiment ${experiments})
     cmake_path(GET experiment STEM name)
     add_executable(${name} ${experiment})
     target_link_libraries(${name} PRIVATE
-        protocols
+        protocols LibM
         PkgConfig::WaylandClient
         PkgConfig::LibDRM PkgConfig::LibGBM
         PkgConfig::WaylandEGL PkgConfig::EGL PkgConfig::GLESv2
