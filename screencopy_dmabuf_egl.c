@@ -295,7 +295,7 @@ static const struct wl_registry_listener registry_listener = {
 
 // --- linux dmabuf event handlers ---
 
-static struct gbm_device * create_gbm_device(ctx_t * ctx, drmDevice *device) {
+static struct gbm_device * create_gbm_device(drmDevice *device) {
     drmDevice *devices[64];
     char * render_node = NULL;
 
@@ -354,7 +354,7 @@ static void linux_dmabuf_feedback_main_device(void * data, struct zwp_linux_dmab
         return;
     }
 
-    ctx->gbm_main_device = create_gbm_device(ctx, drm_device);
+    ctx->gbm_main_device = create_gbm_device(drm_device);
     if (ctx->gbm_main_device == NULL) {
         printf("[error] failed to open gbm device\n");
     }
@@ -413,7 +413,7 @@ static void linux_dmabuf_feedback_tranche_target_device(void * data, struct zwp_
         }
     } else {
         printf("[info] no main device, using tranche device\n");
-        ctx->gbm_main_device = create_gbm_device(ctx, drm_device);
+        ctx->gbm_main_device = create_gbm_device(drm_device);
         ctx->gbm_tranche_device_is_main_device = ctx->gbm_main_device != NULL;
 
         if (ctx->gbm_main_device == NULL) {
